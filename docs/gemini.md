@@ -44,6 +44,9 @@ Examples:
 # Text run
 oracle --engine browser --model gemini-3.5-flash --prompt "Say OK."
 
+# Gemini 4 Argon (paid Google AI Pro/Ultra accounts), with the High thinking tier
+oracle --engine browser --model gemini-4-argon-thinking --prompt "Say OK."
+
 # Deep Think browser run (manual-login profile recommended on macOS)
 oracle --engine browser --browser-manual-login \
   --model gemini-3-deep-think \
@@ -63,6 +66,7 @@ oracle --engine browser --model gemini-3.1-pro \
 Notes:
 
 - Current explicit IDs are `gemini-3.1-flash-lite`, `gemini-3.5-flash`, and `gemini-3.1-pro`.
+- Gemini 4 Argon is `gemini-4-argon`, with `gemini-4-argon-thinking` (High tier) and `gemini-4-argon-thinking-medium` (Medium tier). It requires an account whose Gemini web picker offers "4 Argon"; other accounts are silently downgraded by Google.
 - Legacy `gemini-3-pro`, `gemini-2.5-pro`, and `gemini-2.5-flash` browser names remain accepted and map to current Gemini web models.
 - If your logged-in Gemini account can’t access the requested model, Oracle auto-falls back to Gemini 3.1 Flash-Lite and logs the fallback in verbose mode.
 - Pass `--no-gemini-fallback` to fail instead when the requested web model is unavailable.

@@ -295,6 +295,13 @@ export function resolveApiModel(modelValue: string): ModelName {
       "Gemini Deep Think is browser-only today. Use --engine browser --model gemini-3-deep-think.",
     );
   }
+  if (normalized.includes("argon")) {
+    if (normalized.includes("medium")) return "gemini-4-argon-thinking-medium";
+    if (normalized.includes("thinking") || normalized.includes("high")) {
+      return "gemini-4-argon-thinking";
+    }
+    return "gemini-4-argon";
+  }
   if (normalized.includes("gemini")) {
     if (normalized.includes("3.5") && normalized.includes("flash")) {
       return "gemini-3.5-flash";
@@ -365,6 +372,13 @@ export function inferModelFromLabel(modelValue: string): ModelName {
   }
   if (isGeminiDeepThinkAlias(normalized)) {
     return "gemini-3-pro-deep-think" as ModelName;
+  }
+  if (normalized.includes("argon")) {
+    if (normalized.includes("medium")) return "gemini-4-argon-thinking-medium";
+    if (normalized.includes("thinking") || normalized.includes("high")) {
+      return "gemini-4-argon-thinking";
+    }
+    return "gemini-4-argon";
   }
   if (normalized.includes("gemini")) {
     if (normalized.includes("3.5") && normalized.includes("flash")) {

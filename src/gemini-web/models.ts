@@ -5,7 +5,10 @@ export type GeminiWebModelId =
   | "gemini-3.1-flash-lite"
   | "gemini-3.5-flash"
   | "gemini-3.1-pro"
-  | "gemini-3-pro-deep-think";
+  | "gemini-3-pro-deep-think"
+  | "gemini-4-argon"
+  | "gemini-4-argon-thinking"
+  | "gemini-4-argon-thinking-medium";
 
 export const DEFAULT_GEMINI_WEB_MODEL: GeminiWebModelId = "gemini-3.1-pro";
 export const FALLBACK_GEMINI_WEB_MODEL: GeminiWebModelId = "gemini-3.1-flash-lite";
@@ -40,6 +43,28 @@ const MODEL_SPECS: Record<GeminiWebModelId, GeminiWebModelSpec> = {
     hash: "e051ce1aa80aa576",
     modelCode: 5,
     thinkingCode: 2,
+    capacity: 2,
+  },
+  // Gemini 4 Argon (paid accounts). The web app selects it with model code 8; the
+  // thinking code is 1 (off), 2 (High) or 4 (Medium). The hash is the primary hex
+  // from the web app's model list and is kept alongside the code so the header still
+  // names Argon if the server switches back to hash-based selection.
+  "gemini-4-argon": {
+    hash: "95a4c0abcba24364",
+    modelCode: 8,
+    thinkingCode: 1,
+    capacity: 2,
+  },
+  "gemini-4-argon-thinking": {
+    hash: "95a4c0abcba24364",
+    modelCode: 8,
+    thinkingCode: 2,
+    capacity: 2,
+  },
+  "gemini-4-argon-thinking-medium": {
+    hash: "95a4c0abcba24364",
+    modelCode: 8,
+    thinkingCode: 4,
     capacity: 2,
   },
 };
@@ -100,6 +125,17 @@ export function resolveGeminiWebModel(
     case "gemini-3-pro-deepthink":
     case "gemini-3.1-pro-deep-think":
       return "gemini-3-pro-deep-think";
+    case "gemini-4-argon":
+    case "gemini-4":
+    case "argon":
+      return "gemini-4-argon";
+    case "gemini-4-argon-high":
+    case "gemini-4-argon-thinking":
+    case "gemini-4-argon-thinking-high":
+      return "gemini-4-argon-thinking";
+    case "gemini-4-argon-medium":
+    case "gemini-4-argon-thinking-medium":
+      return "gemini-4-argon-thinking-medium";
     case "gemini-2.5-pro":
       return "gemini-3.1-pro";
     case "gemini-2.5-flash":
