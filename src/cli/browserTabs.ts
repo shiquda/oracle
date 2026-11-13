@@ -26,7 +26,9 @@ import { completeOwnedBrowserHarvest } from "./recoveredBrowserHarvest.js";
 import type { BrowserHarvestIntegrity } from "../sessionManager.js";
 
 const LIVE_POLL_MS = 2000;
-const DEFAULT_STALL_THRESHOLD_MS = 60_000;
+// Reasoning models (GPT-6 Astra, thinking time extra-high) can take several minutes
+// without emitting text. 60s causes premature stall exits in --live/--harvest.
+const DEFAULT_STALL_THRESHOLD_MS = 600_000;
 const HARVEST_FRESHNESS_POLL_MS = 250;
 
 function isRecoverableMissingTabError(message: string): boolean {

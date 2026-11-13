@@ -173,7 +173,8 @@ function assertResolvedModelSelection(desiredModel: string, resolvedLabel: strin
     if (
       !/(?:^| )5 6(?: |$)/.test(normalizedResolved) ||
       !resolvedTokens.includes("sol") ||
-      resolvedTokens.includes("pro")
+      resolvedTokens.includes("pro") ||
+      resolvedTokens.includes("light")
     ) {
       throw new Error(
         `Model picker selected "${resolvedLabel}" while "${desiredModel}" requires GPT-5.6 Sol.`,
@@ -204,6 +205,9 @@ function assertResolvedModelSelection(desiredModel: string, resolvedLabel: strin
 
 function normalizeResolvedModelLabel(value: string): string {
   return value
+    // Split concatenated labels before tokenizing so "SolLight" is not read as "Sol".
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/sol(light|standard|extended|extra|heavy|pro)/gi, "sol $1")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

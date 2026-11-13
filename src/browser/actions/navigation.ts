@@ -321,13 +321,25 @@ function buildChatModeProbeExpression(): string {
         return { status: 'work-selected', chatPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } };
       }
     }
+    // Recent rollouts render the Chat/Work switcher as buttons carrying aria-pressed
+    // with localized labels (zh-CN: 聊天 / 工作). The project page also renders a
+    // 聊天/来源 tablist, so aria-pressed is what tells them apart.
+    const isProject = pathname.includes('/project') || !!document.querySelector('button[data-tpp-toggle-value]');
+    const modeToggles = Array.from(document.querySelectorAll('button[aria-pressed]')).filter(isVisible);
+    const toggleText = (node) => String(node.textContent || '').trim();
+    const isChatToggle = (node) => ['chat', '聊天'].includes(toggleText(node).toLowerCase());
+    const isWorkToggle = (node) => ['work', '工作'].includes(toggleText(node).toLowerCase());
+    const modernChat = modeToggles.find(isChatToggle) || null;
+    const modernWork = modeToggles.find(isWorkToggle) || null;
+    const isSelectedNode = (node) =>
+      node?.hasAttribute?.('aria-pressed') ? node.getAttribute('aria-pressed') === 'true' : isSelected(node);
     const radios = Array.from(document.querySelectorAll('button[role="radio"]')).filter(isVisible);
-    const chat = radios.find((node) => normalize(node.textContent) === 'chat');
-    const work = radios.find((node) => normalize(node.textContent) === 'work');
-    if (!chat && !work) return { status: 'controls-absent' };
+    const chat = modernChat || radios.find((node) => normalize(node.textContent) === 'chat' || node.getAttribute('data-tpp-toggle-value') === 'chatgpt');
+    const work = modernWork || radios.find((node) => normalize(node.textContent) === 'work' || node.getAttribute('data-tpp-toggle-value') === 'work');
+    if (!chat && !work) return { status: isProject ? 'mode-unresolved' : 'controls-absent' };
     if (!chat || !work) return { status: 'mode-unresolved' };
-    if (isSelected(chat)) return { status: 'chat-selected' };
-    if (isSelected(work)) {
+    if (isSelectedNode(chat)) return { status: 'chat-selected' };
+    if (isSelectedNode(work)) {
       const rect = chat.getBoundingClientRect();
       return {
         status: 'work-selected',
@@ -345,11 +357,20 @@ export async function ensureChatMode(
   logger: BrowserLogger,
   options: { pollMs?: number; resetWorkConversation?: () => Promise<void> } = {},
 ): Promise<"chat" | "switched" | "unavailable"> {
-  const verificationWindowMs = Math.min(Math.max(0, timeoutMs), 10_000);
+  // A cold seeded profile needs ~65s to render the (localized) Chat/Work switcher;
+  // upstream caps the caller's window at 10s, which reports a false failure while the
+  // app is still hydrating. Floor a real window at 120s and cap it at 180s; an explicit
+  // zero (already-expired budget) stays zero so callers can fail fast.
+  const verificationWindowMs =
+    timeoutMs > 0 ? Math.min(Math.max(120_000, timeoutMs), 180_000) : 0;
   let deadline = Date.now() + verificationWindowMs;
   const pollMs = Math.max(0, options.pollMs ?? 200);
   let changedFromWork = false;
   let clickedChat = false;
+  // The mode switcher can exist in pre-hydration markup, where a trusted click is a
+  // no-op; retry the switch (throttled, capped) instead of clicking once and giving up.
+  let lastWorkClickAt = 0;
+  let workClicks = 0;
 
   for (;;) {
     const outcome = await Runtime.evaluate({
@@ -405,8 +426,34 @@ export async function ensureChatMode(
         { stage: "chat-mode-selection", details: { mode: "work-conversation" } },
       );
     }
-    if (probe?.status === "work-selected" && !clickedChat && probe.chatPoint) {
-      logger("ChatGPT mode: Work; switching to Chat");
+    if (
+      probe?.status === "work-selected" &&
+      probe.chatPoint &&
+      workClicks < 6 &&
+      Date.now() - lastWorkClickAt >= 3000
+    ) {
+      lastWorkClickAt = Date.now();
+      workClicks += 1;
+      logger(
+        workClicks === 1
+          ? "ChatGPT mode: Work; switching to Chat"
+          : `ChatGPT mode: Work; retrying the Chat switch (attempt ${workClicks})`,
+      );
+      if (workClicks >= 3) {
+        // Trusted input can be swallowed while the app is still hydrating; a DOM click
+        // on the same button is the fallback that has been observed to work there.
+        await Runtime.evaluate({
+          expression:
+            "(() => {" +
+            "const label = (node) => String(node.textContent || '').trim().toLowerCase();" +
+            "const button = Array.from(document.querySelectorAll('button[aria-pressed]')).find((node) => ['chat', '聊天'].includes(label(node)));" +
+            "if (!button) return false;" +
+            "button.click();" +
+            "return true;" +
+            "})()",
+          returnByValue: true,
+        }).catch(() => undefined);
+      }
       const { x, y } = probe.chatPoint;
       await Input.dispatchMouseEvent({ type: "mouseMoved", x, y });
       await Input.dispatchMouseEvent({
@@ -429,7 +476,39 @@ export async function ensureChatMode(
       await delay(pollMs);
       continue;
     }
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline) {
+      // Fail open only when NO switcher rendered. A rendered switcher that is sitting
+      // on Work must never be accepted: Work burns Codex quota and uses a different
+      // composer DOM.
+      const modeProbe = await Runtime.evaluate({
+        expression:
+          "(() => {" +
+          "const label = (node) => String(node.textContent || '').trim().toLowerCase();" +
+          "const press = Array.from(document.querySelectorAll('button[aria-pressed]')).filter((node) => ['chat', 'work', '聊天', '工作'].includes(label(node)));" +
+          "if (press.length === 0) return document.querySelector('button[data-tpp-toggle-value]') ? 'legacy' : 'none';" +
+          "return press.some((node) => ['work', '工作'].includes(label(node)) && node.getAttribute('aria-pressed') === 'true') ? 'work-mode' : 'chat-mode';" +
+          "})()",
+        returnByValue: true,
+      }).catch(() => undefined);
+      const modeState = modeProbe?.result?.value;
+      if (modeState === "chat-mode") {
+        logger("ChatGPT mode: Chat (verified on the last poll of the verification window)");
+        return changedFromWork ? "switched" : "chat";
+      }
+      if (modeState === "work-mode") {
+        throw new BrowserAutomationError(
+          "ChatGPT is still in Work mode and Oracle could not switch it back to Chat; refusing to submit from Work mode (it consumes Codex quota and uses a different composer).",
+          { stage: "chat-mode-selection", details: { mode: "work-mode-unresolved", changedFromWork } },
+        );
+      }
+      if (!changedFromWork && modeState === "none") {
+        logger(
+          "ChatGPT mode: no Chat/Work switcher rendered within the verification window; continuing without mode verification",
+        );
+        return "unavailable";
+      }
+      break;
+    }
     await delay(pollMs);
   }
 
@@ -466,7 +545,9 @@ export async function ensureNotBlocked(
   }
 }
 
-const LOGIN_CHECK_TIMEOUT_MS = 5_000;
+// A cold copied profile can take a while before the signed-in shell hydrates; a 5s
+// auth fetch times out first. Keep authentication mandatory, with a bounded probe.
+const LOGIN_CHECK_TIMEOUT_MS = 30_000;
 const CHATGPT_ACCOUNT_EMAIL_ENV = "ORACLE_CHATGPT_ACCOUNT_EMAIL";
 
 function preferredChatGptAccountEmail(): string | null {

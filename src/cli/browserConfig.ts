@@ -69,6 +69,9 @@ export interface BrowserFlagOptions {
   chatgptUrl?: string;
   browserUrl?: string;
   browserTimeout?: string;
+  // Overall task budget (--timeout); used to keep the browser wait from cutting off
+  // a model that is still generating.
+  timeout?: string | number;
   browserInputTimeout?: string;
   browserApprovalWait?: string;
   browserAttachmentTimeout?: string;
@@ -276,11 +279,16 @@ export async function buildBrowserConfig(
     attachRunning,
     url,
     debugPort: selectBrowserPort(options),
+    // Never let --browser-timeout truncate a response while the overall --timeout
+    // budget still has room: a small --browser-timeout used to cut long generations.
     timeoutMs: options.browserTimeout
-      ? parseBrowserDuration(
-          options.browserTimeout,
-          "--browser-timeout",
-          DEFAULT_BROWSER_TIMEOUT_MS,
+      ? Math.max(
+          parseBrowserDuration(
+            options.browserTimeout,
+            "--browser-timeout",
+            DEFAULT_BROWSER_TIMEOUT_MS,
+          ),
+          options.timeout ? parseBrowserDuration(String(options.timeout), "--timeout", 0) : 0,
         )
       : undefined,
     inputTimeoutMs: options.browserInputTimeout
