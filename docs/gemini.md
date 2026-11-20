@@ -65,24 +65,28 @@ oracle --engine browser --model gemini-3.1-pro \
 
 ### Multiple accounts in one Chrome profile
 
-For local Gemini web runs, sign both accounts into the `Default` Chrome profile.
+For local Gemini web runs, sign the accounts into the same `Default` Chrome profile.
 Create `~/.oracle/gemini-accounts.json` (or put it under `ORACLE_HOME_DIR` if set):
 
 ```json
 [
   { "alias": "primary", "slot": 0, "email": "primary@example.com" },
-  { "alias": "secondary", "slot": 1, "email": "secondary@example.com" }
+  { "alias": "secondary", "slot": 1, "email": "secondary@example.com" },
+  { "alias": "third", "slot": 2, "email": "third@example.com" }
 ]
 ```
 
-Slot `0` is `/app`; slot `1` is `/u/1/app`. Use the email shown in each page's
-Google Account menu. Keep the file private (`chmod 600`); it holds the expected
-identities, not cookies or tokens. Oracle checks the account before sending the
-prompt and stops if a slot no longer matches.
+Slot `0` is `/app`; for other accounts, use the number in `/u/<slot>/app`.
+Slots need not be consecutive. Add a row with a unique alias, slot, and email
+for each account you want Oracle to use. The next run reads the updated list;
+there is no need to reset rotation state. Keep the file private (`chmod 600`).
+Oracle checks the email shown for the selected slot before sending the prompt
+and stops if it no longer matches.
 
 New local text-only runs rotate through the configured accounts in file order.
 If Gemini returns a known usage-limit error before generating a response, Oracle
-tries the next account once with the original model. Generic HTTP 429s, login
+tries only the next account once with the original model, even when the pool
+contains more than two accounts. Generic HTTP 429s, login
 challenges, timeouts, and partial responses do not trigger account switching.
 This automatic policy does not cover file or YouTube inputs, image operations,
 existing sessions, remote runs, or DOM-based Deep Think.
