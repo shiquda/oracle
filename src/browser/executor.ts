@@ -14,6 +14,7 @@ export type BrowserExecutorOptions = Pick<
   | "aspectRatio"
   | "geminiShowThoughts"
   | "geminiAllowModelFallback"
+  | "geminiAccount"
 >;
 
 export async function resolveBrowserExecutor(
@@ -25,6 +26,9 @@ export async function resolveBrowserExecutor(
     throw new Error(`Unsupported browser model: ${options.model}. Use a GPT or Gemini model.`);
   }
   if (remote) {
+    if (options.geminiAccount && options.geminiAccount !== "auto") {
+      throw new Error("--gemini-account requires a local Gemini browser run.");
+    }
     const { createRemoteBrowserExecutor } = await import("../remote/client.js");
     return createRemoteBrowserExecutor({ ...remote, runOptions: options });
   }
@@ -38,6 +42,7 @@ export async function resolveBrowserExecutor(
       aspectRatio: options.aspectRatio,
       showThoughts: options.geminiShowThoughts,
       allowModelFallback: options.geminiAllowModelFallback,
+      accountSelection: options.geminiAccount,
     });
   }
   return (await import("../browserMode.js")).runBrowserMode;

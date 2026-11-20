@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { GeminiWebAccount } from "./accounts.js";
 import { fetchGeminiWebResource } from "./http.js";
 import {
   buildGeminiWebModelHeader,
@@ -17,6 +18,9 @@ export interface GeminiWebRunInput {
   model: GeminiWebModelId;
   allowModelFallback?: boolean;
   cookieMap: Record<string, string>;
+  account?: GeminiWebAccount;
+  quotaFallbackAccount?: GeminiWebAccount;
+  onAccountFallback?: (account: GeminiWebAccount) => void;
   chatMetadata?: unknown;
   signal?: AbortSignal;
 }
@@ -35,6 +39,7 @@ export interface GeminiWebRunOutput {
   metadata: unknown;
   images: GeminiWebCandidateImage[];
   errorCode?: number;
+  generationStarted?: boolean;
   errorMessage?: string;
 }
 
@@ -47,6 +52,7 @@ const GEMINI_APP_URL = "https://gemini.google.com/app";
 const GEMINI_STREAM_GENERATE_URL =
   "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate";
 const GEMINI_UPLOAD_URL = "https://content-push.googleapis.com/upload";
+const GEMINI_USAGE_LIMIT_EXCEEDED = 1037;
 const GEMINI_UPLOAD_PUSH_ID = "feeds/mcudyrk2a4khkz";
 const GEMINI_UPLOAD_MIME_TYPES: Record<string, string> = {
   ".bmp": "image/bmp",
@@ -105,9 +111,11 @@ function buildCookieHeader(cookieMap: Record<string, string>): string {
 export async function fetchGeminiAccessToken(
   cookieMap: Record<string, string>,
   signal?: AbortSignal,
+  account?: GeminiWebAccount,
 ): Promise<string> {
   const cookieHeader = buildCookieHeader(cookieMap);
-  const res = await fetchGeminiWebResource(GEMINI_APP_URL, {
+  const appUrl = account?.slot ? `https://gemini.google.com/u/${account.slot}/app` : GEMINI_APP_URL;
+  const res = await fetchGeminiWebResource(appUrl, {
     redirect: "follow",
     signal,
     headers: {
@@ -115,7 +123,23 @@ export async function fetchGeminiAccessToken(
       "user-agent": USER_AGENT,
     },
   });
+  if (account && (!res.ok || res.url !== appUrl)) {
+    await res.body?.cancel();
+    throw new Error(
+      `Gemini could not open the expected account page for "${account.alias}" (HTTP ${res.status}).`,
+    );
+  }
   const html = await res.text();
+  if (account) {
+    // Active account identity in Gemini's bootstrap. Never fall back to another slot
+    // when Google removes this field or the Chrome sign-in order changes.
+    const actual = html.match(/"oPEP7c"\s*:\s*"([^"\\]+)"/)?.[1];
+    if (actual?.toLowerCase() !== account.email) {
+      throw new Error(
+        `Gemini could not verify the configured account "${account.alias}". Check its Chrome slot.`,
+      );
+    }
+  }
 
   const tokens = ["SNlM0e", "thykhd"] as const;
   for (const key of tokens) {
@@ -281,6 +305,7 @@ export function parseGeminiStreamGenerateResponse(rawText: string): {
   images: GeminiWebCandidateImage[];
   errorCode?: number;
 } {
+  generationStarted?: boolean;
   const responseJson = JSON.parse(trimGeminiJsonEnvelope(rawText)) as unknown;
   const errorCode = extractErrorCode(responseJson);
 
@@ -365,7 +390,14 @@ export function parseGeminiStreamGenerateResponse(rawText: string): {
     }
   }
 
-  return { metadata, text, thoughts, images, errorCode };
+  return {
+    metadata,
+    text,
+    thoughts,
+    images,
+    errorCode,
+    ...(body === null ? {} : { generationStarted: true }),
+  };
 }
 
 export function isGeminiModelUnavailable(errorCode: number | undefined): boolean {
@@ -374,7 +406,7 @@ export function isGeminiModelUnavailable(errorCode: number | undefined): boolean
 
 export async function runGeminiWebOnce(input: GeminiWebRunInput): Promise<GeminiWebRunOutput> {
   const cookieHeader = buildCookieHeader(input.cookieMap);
-  const at = await fetchGeminiAccessToken(input.cookieMap, input.signal);
+  const at = await fetchGeminiAccessToken(input.cookieMap, input.signal, input.account);
 
   const uploaded: Array<{ id: string; name: string; mimeType: string }> = [];
   for (const file of input.files ?? []) {
@@ -396,14 +428,18 @@ export async function runGeminiWebOnce(input: GeminiWebRunInput): Promise<Gemini
   params.set("at", at);
   params.set("f.req", fReq);
 
-  const res = await fetchGeminiWebResource(GEMINI_STREAM_GENERATE_URL, {
+  const accountPath = input.account?.slot ? `/u/${input.account.slot}` : "";
+  const generateUrl = accountPath
+    ? GEMINI_STREAM_GENERATE_URL.replace("/_/BardChatUi", `${accountPath}/_/BardChatUi`)
+    : GEMINI_STREAM_GENERATE_URL;
+  const res = await fetchGeminiWebResource(generateUrl, {
     method: "POST",
-    redirect: "follow",
+    redirect: input.account ? "error" : "follow",
     signal: input.signal,
     headers: {
       "content-type": "application/x-www-form-urlencoded;charset=utf-8",
       origin: "https://gemini.google.com",
-      referer: "https://gemini.google.com/",
+      referer: `https://gemini.google.com${accountPath}/`,
       "x-same-domain": "1",
       "user-agent": USER_AGENT,
       cookie: cookieHeader,
@@ -436,6 +472,7 @@ export async function runGeminiWebOnce(input: GeminiWebRunInput): Promise<Gemini
       metadata: parsed.metadata,
       images: parsed.images,
       errorCode: parsed.errorCode,
+      generationStarted: parsed.generationStarted,
     };
   } catch (error) {
     let responseJson: unknown = null;
@@ -462,6 +499,24 @@ export async function runGeminiWebWithFallback(
   input: Omit<GeminiWebRunInput, "model"> & { model: GeminiWebModelId },
 ): Promise<GeminiWebRunOutput & { effectiveModel: GeminiWebModelId }> {
   const attempt = await runGeminiWebOnce(input);
+  if (
+    input.quotaFallbackAccount &&
+    input.account &&
+    attempt.errorCode === GEMINI_USAGE_LIMIT_EXCEEDED &&
+    !attempt.generationStarted &&
+    !attempt.text &&
+    !attempt.images.length &&
+    !attempt.errorMessage &&
+    !extractGgdlUrls(attempt.rawResponseText).length &&
+    !input.files?.length &&
+    input.chatMetadata == null
+  ) {
+    input.signal?.throwIfAborted();
+    const account = input.quotaFallbackAccount;
+    input.onAccountFallback?.(account);
+    const fallback = await runGeminiWebOnce({ ...input, account });
+    return { ...assertGeminiWebRunSucceeded(fallback), effectiveModel: input.model };
+  }
   if (isGeminiModelUnavailable(attempt.errorCode) && input.model !== FALLBACK_GEMINI_WEB_MODEL) {
     if (input.allowModelFallback === false) {
       throw new Error(

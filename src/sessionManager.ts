@@ -317,6 +317,7 @@ export interface StoredRunOptions {
   aspectRatio?: string;
   geminiShowThoughts?: boolean;
   geminiAllowModelFallback?: boolean;
+  geminiAccount?: string;
 }
 
 export interface SessionMetadata {
@@ -803,6 +804,7 @@ export async function initializeSession(
       aspectRatio: options.aspectRatio,
       geminiShowThoughts: options.geminiShowThoughts,
       geminiAllowModelFallback: options.geminiAllowModelFallback,
+      geminiAccount: options.geminiAccount === "auto" ? undefined : options.geminiAccount,
     },
   };
   await ensureDir(modelsDir(sessionId));

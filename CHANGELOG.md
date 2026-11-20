@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gemini web: opt into same-profile account rotation, usage-limit failover, and explicit account selection for local CLI runs.
 ## 0.23.0 - 2026-11-05
 
 **Highlights:** Run current ChatGPT Deep Research flows, select models on localized pages, and recover image-only replies and exited sessions.

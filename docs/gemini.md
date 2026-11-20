@@ -63,6 +63,34 @@ oracle --engine browser --model gemini-3.1-pro \
   --edit-image in.png --output out.jpg
 ```
 
+### Multiple accounts in one Chrome profile
+
+For local Gemini web runs, sign both accounts into the `Default` Chrome profile.
+Create `~/.oracle/gemini-accounts.json` (or put it under `ORACLE_HOME_DIR` if set):
+
+```json
+[
+  { "alias": "primary", "slot": 0, "email": "primary@example.com" },
+  { "alias": "secondary", "slot": 1, "email": "secondary@example.com" }
+]
+```
+
+Slot `0` is `/app`; slot `1` is `/u/1/app`. Use the email shown in each page's
+Google Account menu. Keep the file private (`chmod 600`); it holds the expected
+identities, not cookies or tokens. Oracle checks the account before sending the
+prompt and stops if a slot no longer matches.
+
+New local text-only runs rotate through the configured accounts in file order.
+If Gemini returns a known usage-limit error before generating a response, Oracle
+tries the next account once with the original model. Generic HTTP 429s, login
+challenges, timeouts, and partial responses do not trigger account switching.
+This automatic policy does not cover file or YouTube inputs, image operations,
+existing sessions, remote runs, or DOM-based Deep Think.
+
+Pin a run to one alias with `--gemini-account secondary`. That run cannot switch
+accounts automatically. `--no-gemini-fallback` still controls model downgrade
+only. Without an account file, default single-account behavior is unchanged.
+
 Notes:
 
 - Current explicit IDs are `gemini-3.1-flash-lite`, `gemini-3.5-flash`, and `gemini-3.1-pro`.

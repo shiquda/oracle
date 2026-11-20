@@ -226,6 +226,7 @@ export interface RunOracleOptions {
   aspectRatio?: string;
   geminiShowThoughts?: boolean;
   geminiAllowModelFallback?: boolean;
+  geminiAccount?: string;
   /**
    * Browser-only: submit these prompts sequentially after the initial answer in
    * the same ChatGPT conversation.

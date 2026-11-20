@@ -15,6 +15,7 @@ import type { GeminiWebOptions, GeminiWebResponse } from "./types.js";
 import { openGeminiBrowserSession } from "./browserSessionManager.js";
 import { selectGeminiExecutionMode } from "./executionMode.js";
 import type { IGeminiExecutionClient } from "./executionClients.js";
+import { selectGeminiWebAccounts } from "./accounts.js";
 
 const GEMINI_COOKIE_NAMES = [
   "__Secure-1PSID",
@@ -369,6 +370,27 @@ export function createGeminiWebExecutor(
       generateImagePath,
       editImagePath,
     });
+    const selection = geminiOptions.accountSelection;
+    const explicitAccount = selection !== undefined && selection !== "auto";
+    const existingConversation =
+      runOptions.config?.resumeConversationUrl || runOptions.followUpPrompts?.length;
+    if (explicitAccount && (modeSelection.mode !== "http" || existingConversation)) {
+      throw new Error("--gemini-account requires a new Gemini HTTP conversation.");
+    }
+    const canAutoRoute =
+      !attachmentPaths.length &&
+      !runOptions.fallbackSubmission &&
+      !generateImagePath &&
+      !editImagePath &&
+      !runOptions.generateImagePath &&
+      !geminiOptions.youtube &&
+      !existingConversation &&
+      !runOptions.config?.manualLogin &&
+      !runOptions.config?.attachRunning &&
+      !runOptions.config?.remoteChrome &&
+      !runOptions.config?.inlineCookies?.length &&
+      !runOptions.config?.chromeCookiePath &&
+      (!runOptions.config?.chromeProfile || runOptions.config.chromeProfile === "Default");
 
     const domClient: IGeminiExecutionClient = {
       mode: "dom",
@@ -425,12 +447,18 @@ export function createGeminiWebExecutor(
         let response: GeminiWebResponse;
 
         try {
+          const route =
+            selection && (explicitAccount || canAutoRoute)
+              ? await selectGeminiWebAccounts(selection)
+              : undefined;
+          if (route) log?.(`[browser] Gemini account: ${route.primary.alias}`);
           if (editImagePath) {
             const intro = await runGeminiWebWithFallback({
               prompt: "Here is an image to edit",
               files: [editImagePath],
               model,
               cookieMap: cookieResult.cookieMap,
+              account: route?.primary,
               chatMetadata: null,
               signal: deliverySignal,
               allowModelFallback: geminiOptions.allowModelFallback,
@@ -441,6 +469,7 @@ export function createGeminiWebExecutor(
               files: attachmentPaths,
               model,
               cookieMap: cookieResult.cookieMap,
+              account: route?.primary,
               chatMetadata: intro.metadata,
               signal: deliverySignal,
               allowModelFallback: geminiOptions.allowModelFallback,
@@ -472,6 +501,7 @@ export function createGeminiWebExecutor(
               files: attachmentPaths,
               model,
               cookieMap: cookieResult.cookieMap,
+              account: route?.primary,
               chatMetadata: null,
               signal: deliverySignal,
               allowModelFallback: geminiOptions.allowModelFallback,
@@ -501,6 +531,12 @@ export function createGeminiWebExecutor(
               files: attachmentPaths,
               model,
               cookieMap: cookieResult.cookieMap,
+              account: route?.primary,
+              quotaFallbackAccount: route?.fallback,
+              onAccountFallback:
+                route?.fallback && log
+                  ? (account) => log(`[browser] Gemini account quota fallback: ${account.alias}`)
+                  : undefined,
               chatMetadata: null,
               signal: deliverySignal,
               allowModelFallback: geminiOptions.allowModelFallback,

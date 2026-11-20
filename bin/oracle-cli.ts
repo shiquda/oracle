@@ -182,6 +182,7 @@ interface CliOptions extends OptionValues {
   aspect?: string;
   geminiShowThoughts?: boolean;
   geminiFallback?: boolean;
+  geminiAccount?: string;
   copyMarkdown?: boolean;
   copy?: boolean;
   verbose?: boolean;
@@ -958,6 +959,7 @@ program
     "--no-gemini-fallback",
     "Fail if the requested Gemini web model is unavailable instead of using Flash-Lite.",
   )
+  .option("--gemini-account <alias>", "Use a configured account for local Gemini web requests.")
   .option(
     "--retain-hours <hours>",
     "Prune stored sessions older than this many hours before running (set 0 to disable).",
@@ -1486,6 +1488,7 @@ function buildRunOptions(
     aspectRatio: overrides.aspectRatio ?? options.aspect,
     geminiShowThoughts: overrides.geminiShowThoughts ?? options.geminiShowThoughts,
     geminiAllowModelFallback: overrides.geminiAllowModelFallback ?? options.geminiFallback,
+    geminiAccount: overrides.geminiAccount ?? options.geminiAccount,
     outputPath: overrides.outputPath ?? options.output,
     browserFollowUps: overrides.browserFollowUps ?? options.browserFollowUp ?? [],
     background: overrides.background ?? undefined,
@@ -1795,6 +1798,7 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     aspectRatio: stored.aspectRatio,
     geminiShowThoughts: stored.geminiShowThoughts,
     geminiAllowModelFallback: stored.geminiAllowModelFallback,
+    geminiAccount: stored.geminiAccount,
     outputPath: stored.outputPath,
     browserFollowUps: stored.browserFollowUps,
     background: stored.background,
@@ -2247,6 +2251,12 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     }
   }
   const activeModel = resolvedOptions.model;
+  if (
+    options.geminiAccount &&
+    (engine !== "browser" || !activeModel.startsWith("gemini") || remoteHost)
+  ) {
+    throw new Error("--gemini-account requires a local Gemini browser run.");
+  }
   if (options.writeArtifacts && engine !== "browser") {
     throw new Error("--write-artifacts requires --engine browser.");
   }
@@ -2473,6 +2483,15 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   const liveRunOptions: RunOracleOptions = {
     ...baseRunOptions,
     sessionId: sessionMeta.id,
+    geminiAccount:
+      baseRunOptions.geminiAccount ??
+      (sessionMode === "browser" &&
+      !remoteHost &&
+      activeModel.startsWith("gemini") &&
+      !baseRunOptions.file?.length &&
+      !resolvedOptions.followup
+        ? "auto"
+        : undefined),
     effectiveModelId: resolvedOptions.effectiveModelId ?? effectiveModelId,
   };
   const disableDetachEnv = process.env.ORACLE_NO_DETACH === "1";
